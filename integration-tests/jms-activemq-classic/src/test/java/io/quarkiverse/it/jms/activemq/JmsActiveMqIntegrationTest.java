@@ -6,14 +6,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.is;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
 import io.quarkus.test.common.WithTestResource;
 import io.quarkus.test.junit.QuarkusTest;
-import io.restassured.common.mapper.TypeRef;
 
 @QuarkusTest
 @WithTestResource(ActiveMqTestResource.class)
@@ -38,9 +36,7 @@ public class JmsActiveMqIntegrationTest {
                 .then().statusCode(204);
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
-            List<String> received = get("/jms/listener/received")
-                    .as(new TypeRef<>() {
-                    });
+            String received = get("/jms/listener/received").asString();
             assertThat(received).contains("listener-activemq");
         });
     }
@@ -52,13 +48,11 @@ public class JmsActiveMqIntegrationTest {
                 .then().statusCode(204);
 
         await().atMost(30, TimeUnit.SECONDS).untilAsserted(() -> {
-            List<String> xaReceived = get("/jms/listener/xa-received").as(new TypeRef<>() {
-            });
+            String xaReceived = get("/jms/listener/xa-received").asString();
             assertThat(xaReceived).contains("listener-xa-activemq");
         });
 
-        List<String> dbMessages = get("/jms/xa/messages").as(new TypeRef<>() {
-        });
+        String dbMessages = get("/jms/xa/messages").asString();
         assertThat(dbMessages).contains("listener-xa:listener-xa-activemq");
     }
 
@@ -68,8 +62,7 @@ public class JmsActiveMqIntegrationTest {
                 .post("/jms/xa/send-and-insert")
                 .then().statusCode(204);
 
-        List<String> dbMessages = get("/jms/xa/messages").as(new TypeRef<>() {
-        });
+        String dbMessages = get("/jms/xa/messages").asString();
         assertThat(dbMessages).contains("client-xa:client-xa-msg");
 
         String received = get("/jms/receive/xa-commit-queue")
@@ -83,8 +76,7 @@ public class JmsActiveMqIntegrationTest {
                 .post("/jms/xa/send-and-rollback")
                 .then().statusCode(500);
 
-        List<String> dbMessages = get("/jms/xa/messages").as(new TypeRef<>() {
-        });
+        String dbMessages = get("/jms/xa/messages").asString();
         assertThat(dbMessages).doesNotContain("should-not-persist-client:client-rollback");
     }
 }

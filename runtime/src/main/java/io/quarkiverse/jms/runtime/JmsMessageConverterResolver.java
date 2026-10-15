@@ -5,10 +5,12 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.jms.JMSContext;
 import jakarta.jms.Message;
 
+import io.quarkiverse.jms.JmsConversionException;
 import io.quarkiverse.jms.JmsMessageConverter;
 import io.quarkiverse.jms.ReceiveMessage;
 import io.quarkus.arc.All;
@@ -23,16 +25,16 @@ import io.quarkus.arc.All;
 public class JmsMessageConverterResolver {
 
     private final BuiltInJmsMessageConverter builtIn;
-    private final JacksonJmsMessageConverter jackson;
+    private final JmsMessageConverter jackson;
     private final List<JmsMessageConverter> customConverters;
     private final ConcurrentHashMap<Class<?>, JmsMessageConverter> cache = new ConcurrentHashMap<>();
 
     @Inject
     public JmsMessageConverterResolver(BuiltInJmsMessageConverter builtIn,
-            JacksonJmsMessageConverter jackson,
+            Instance<JacksonJmsMessageConverter> jacksonInstance,
             @All List<JmsMessageConverter> allConverters) {
         this.builtIn = builtIn;
-        this.jackson = jackson;
+        this.jackson = jacksonInstance.isResolvable() ? jacksonInstance.get() : null;
         this.customConverters = new ArrayList<>();
         for (JmsMessageConverter converter : allConverters) {
             if (converter != builtIn && converter != jackson) {
@@ -63,7 +65,13 @@ public class JmsMessageConverterResolver {
             if (builtIn.supports(t)) {
                 return builtIn;
             }
-            return jackson;
+            if (jackson != null) {
+                return jackson;
+            }
+            throw new JmsConversionException(
+                    "No JMS message converter found for type " + t.getName()
+                            + ". Add the quarkus-jackson dependency or provide a custom JmsMessageConverter.",
+                    null);
         });
     }
 }

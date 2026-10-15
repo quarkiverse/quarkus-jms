@@ -19,7 +19,7 @@ import io.quarkiverse.jms.JmsQueue;
 import io.smallrye.common.annotation.Identifier;
 
 @Path("/jms")
-@Produces(MediaType.APPLICATION_JSON)
+@Produces(MediaType.TEXT_PLAIN)
 public class JmsResource {
 
     @Inject
@@ -55,14 +55,14 @@ public class JmsResource {
 
     @GET
     @Path("/listener/received")
-    public List<String> listenerReceived() {
-        return listenerApp.getReceived();
+    public String listenerReceived() {
+        return String.join("\n", listenerApp.getReceived());
     }
 
     @GET
     @Path("/listener/xa-received")
-    public List<String> listenerXaReceived() {
-        return listenerApp.getXaReceived();
+    public String listenerXaReceived() {
+        return String.join("\n", listenerApp.getXaReceived());
     }
 
     @POST
@@ -84,7 +84,7 @@ public class JmsResource {
 
     @GET
     @Path("/xa/messages")
-    public List<String> xaMessages() {
+    public String xaMessages() {
         try (var connection = dataSource.getConnection();
                 var stmt = connection.createStatement();
                 var rs = stmt.executeQuery("SELECT payload FROM xa_messages ORDER BY id")) {
@@ -92,7 +92,7 @@ public class JmsResource {
             while (rs.next()) {
                 messages.add(rs.getString("payload"));
             }
-            return messages;
+            return String.join("\n", messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

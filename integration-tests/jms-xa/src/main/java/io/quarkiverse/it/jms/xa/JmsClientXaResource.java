@@ -8,9 +8,11 @@ import javax.sql.DataSource;
 
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
@@ -144,6 +146,24 @@ public class JmsClientXaResource {
                     }
                     return count;
                 });
+    }
+
+    @POST
+    @Path("/send-pojo/{queue}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    public void sendPojo(@PathParam("queue") String queue, OrderDto order) {
+        jmsClient.queue(queue).send(order);
+    }
+
+    @GET
+    @Path("/receive-pojo/{queue}")
+    public OrderDto receivePojo(@PathParam("queue") String queue) {
+        return jmsClient.queue(queue, OrderDto.class)
+                .receive()
+                .orElse(null);
+    }
+
+    public record OrderDto(String id, String product, int quantity) {
     }
 
     @GET

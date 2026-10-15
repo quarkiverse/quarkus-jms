@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
@@ -191,6 +192,23 @@ public class JmsXaIntegrationTest {
                 .extract().asString();
 
         assertThat(redelivered).contains("rollback-test");
+    }
+
+    @Test
+    void jsonPojoSendAndReceive() {
+        given().contentType("application/json")
+                .body("{\"id\":\"ord-1\",\"product\":\"widget\",\"quantity\":5}")
+                .post("/xa-client/send-pojo/pojo-queue")
+                .then().statusCode(204);
+
+        var order = get("/xa-client/receive-pojo/pojo-queue")
+                .then().statusCode(200)
+                .extract().as(new TypeRef<Map<String, Object>>() {
+                });
+
+        assertThat(order.get("id")).isEqualTo("ord-1");
+        assertThat(order.get("product")).isEqualTo("widget");
+        assertThat(order.get("quantity")).isEqualTo(5);
     }
 
     @Test

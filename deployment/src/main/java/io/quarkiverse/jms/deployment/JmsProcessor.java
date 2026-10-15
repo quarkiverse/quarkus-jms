@@ -99,18 +99,19 @@ class JmsProcessor {
     }
 
     @BuildStep
-    void registerBeans(BuildProducer<AdditionalBeanBuildItem> beans) {
-        beans.produce(AdditionalBeanBuildItem.builder()
+    void registerBeans(BuildProducer<AdditionalBeanBuildItem> beans, Capabilities capabilities) {
+        var builder = AdditionalBeanBuildItem.builder()
                 .addBeanClasses(
                         JmsClientImpl.class,
                         JmsListenerRegistryImpl.class,
                         JmsConnectionFactoryResolver.class,
                         BuiltInJmsMessageConverter.class,
-                        JacksonJmsMessageConverter.class,
                         JmsMessageConverterResolver.class,
-                        JmsMdcInstrumentation.class)
-                .setUnremovable()
-                .build());
+                        JmsMdcInstrumentation.class);
+        if (capabilities.isPresent(Capability.JACKSON)) {
+            builder.addBeanClasses(JacksonJmsMessageConverter.class);
+        }
+        beans.produce(builder.setUnremovable().build());
     }
 
     @BuildStep
@@ -256,6 +257,7 @@ class JmsProcessor {
     @BuildStep
     void generateInvokers(
             CombinedIndexBuildItem combinedIndex,
+            Capabilities capabilities,
             List<JmsListenerBuildItem> listeners,
             BuildProducer<GeneratedClassBuildItem> generatedClasses,
             BuildProducer<ReflectiveClassBuildItem> reflective,
@@ -266,13 +268,14 @@ class JmsProcessor {
         }
 
         boolean hasCustomConverters = hasCustomConverters(combinedIndex);
+        boolean jacksonAvailable = capabilities.isPresent(Capability.JACKSON);
 
         ClassOutput classOutput = (name, data) -> {
             generatedClasses.produce(new GeneratedClassBuildItem(true, name, data));
         };
 
         for (JmsListenerBuildItem listener : listeners) {
-            String invokerClassName = generateInvoker(classOutput, listener, hasCustomConverters);
+            String invokerClassName = generateInvoker(classOutput, listener, hasCustomConverters, jacksonAvailable);
             reflective.produce(ReflectiveClassBuildItem.builder(invokerClassName)
                     .constructors(true).build());
 
@@ -443,7 +446,7 @@ class JmsProcessor {
     }
 
     private String generateInvoker(ClassOutput classOutput, JmsListenerBuildItem listener,
-            boolean hasCustomConverters) {
+            boolean hasCustomConverters, boolean jacksonAvailable) {
         String beanClassName = listener.method().beanClassName();
         String methodName = listener.method().methodName();
         String payloadType = listener.method().payloadType();
@@ -456,8 +459,10 @@ class JmsProcessor {
             converterClass = JmsMessageConverterResolver.class;
         } else if (isBuiltInType(payloadType)) {
             converterClass = BuiltInJmsMessageConverter.class;
-        } else {
+        } else if (jacksonAvailable) {
             converterClass = JacksonJmsMessageConverter.class;
+        } else {
+            converterClass = JmsMessageConverterResolver.class;
         }
 
         // Determine return type info
