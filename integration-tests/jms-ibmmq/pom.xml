@@ -12,7 +12,7 @@
     <name>Quarkus JMS - Integration Tests - IBM MQ</name>
 
     <properties>
-        <ibmmq.client.version>10.0.0.5</ibmmq.client.version>
+        <ibmmq.client.version>10.0.1.0</ibmmq.client.version>
     </properties>
 
     <dependencies>
