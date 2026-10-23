@@ -117,18 +117,23 @@ class JmsProcessor {
     }
 
     @BuildStep
-    void registerMicrometerInstrumentation(BuildProducer<AdditionalBeanBuildItem> beans, Capabilities capabilities) {
+    void registerInstrumentation(BuildProducer<AdditionalBeanBuildItem> beans,
+            Capabilities capabilities) {
+        boolean observationPresent = isClassPresent("io.micrometer.observation.ObservationRegistry")
+                && isClassPresent("io.quarkus.observation.cdi.ObservedInterceptor");
+
         if (capabilities.isPresent(Capability.METRICS)) {
             beans.produce(AdditionalBeanBuildItem.builder()
                     .addBeanClass("io.quarkiverse.jms.runtime.instrumentation.JmsMetricsInstrumentation")
                     .setUnremovable()
                     .build());
         }
-    }
-
-    @BuildStep
-    void registerOpenTelemetryInstrumentation(BuildProducer<AdditionalBeanBuildItem> beans, Capabilities capabilities) {
-        if (capabilities.isPresent(Capability.OPENTELEMETRY_TRACER)) {
+        if (observationPresent) {
+            beans.produce(AdditionalBeanBuildItem.builder()
+                    .addBeanClass("io.quarkiverse.jms.runtime.instrumentation.JmsObservationInstrumentation")
+                    .setUnremovable()
+                    .build());
+        } else if (capabilities.isPresent(Capability.OPENTELEMETRY_TRACER)) {
             beans.produce(AdditionalBeanBuildItem.builder()
                     .addBeanClass("io.quarkiverse.jms.runtime.instrumentation.JmsTracingInstrumentation")
                     .setUnremovable()
@@ -623,6 +628,15 @@ class JmsProcessor {
                 MethodDescriptor.ofMethod("io.quarkus.arc.InstanceHandle", "get", Object.class),
                 handle);
         return mc.checkCast(bean, beanClassName);
+    }
+
+    private static boolean isClassPresent(String className) {
+        try {
+            Class.forName(className, false, Thread.currentThread().getContextClassLoader());
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
     }
 
     private static boolean isJmsMessageType(String typeName) {

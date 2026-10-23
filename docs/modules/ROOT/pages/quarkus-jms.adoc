@@ -826,20 +826,21 @@ quarkus.jms.health-enabled=false
 
 == Observability
 
-=== OpenTelemetry Tracing
+=== Tracing
 
-When `quarkus-opentelemetry` is on the classpath, JMS operations are automatically traced:
+JMS operations are automatically traced when either `quarkus-observation` or `quarkus-opentelemetry` is on the classpath.
+When both are present, the https://micrometer.io/docs/observation[Observation API] is used and direct OpenTelemetry instrumentation is disabled to avoid duplicate spans.
 
 [cols="30,20,50"]
 |===
-| Span name | Kind | Description
+| Span / Observation name | Kind | Description
 
 | `{destination} publish` | PRODUCER | Created on `JmsClient.send()`, trace context injected into message properties
 | `{destination} receive` | CONSUMER | Created on `JmsClient.receive()`, trace context extracted from message
 | `{destination} process` | CONSUMER | Created on `@JmsListener` invocation, trace context extracted from message
 |===
 
-Span attributes follow the https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/[OTel Messaging semantic conventions]:
+Attributes follow the https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/[OTel Messaging semantic conventions]:
 `messaging.system`, `messaging.destination.name`, `messaging.destination.kind`, `messaging.operation.type`, `messaging.message.id`.
 
 Trace context is propagated via JMS message properties using the W3C Trace Context format.
