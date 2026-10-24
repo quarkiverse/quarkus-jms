@@ -4,7 +4,7 @@
     <parent>
         <artifactId>quarkus-jms-integration-tests-parent</artifactId>
         <groupId>io.quarkiverse.jms</groupId>
-        <version>999-SNAPSHOT</version>
+        <version>0.3.0</version>
     </parent>
 
     <artifactId>quarkus-integration-test-jms-ironjacamar</artifactId>
