@@ -23,6 +23,7 @@
         <module>jms-oracle-aq</module>
         <module>jms-virtual-threads</module>
         <module>jms-pooled</module>
+        <module>jms-native-pojo</module>
         <module>jms-ironjacamar</module>
         <module>jms-qpid</module>
     </modules>

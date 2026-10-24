@@ -426,7 +426,8 @@ class JmsProcessor {
     }
 
     @BuildStep
-    void nativeImage(BuildProducer<ReflectiveClassBuildItem> reflective) {
+    void nativeImage(List<JmsListenerBuildItem> listeners, CombinedIndexBuildItem combinedIndex,
+            BuildProducer<ReflectiveClassBuildItem> reflective) {
         reflective.produce(ReflectiveClassBuildItem.builder(
                 "jakarta.jms.Message",
                 "jakarta.jms.TextMessage",
@@ -436,6 +437,56 @@ class JmsProcessor {
                 "jakarta.jms.StreamMessage")
                 .methods(true)
                 .build());
+
+        Set<String> payloadTypes = new HashSet<>();
+
+        for (JmsListenerBuildItem listener : listeners) {
+            addPayloadType(payloadTypes, listener.payloadType());
+            String returnType = listener.method().returnType().name().toString();
+            if (!returnType.equals("void")) {
+                if (JMS_RESPONSE.toString().equals(returnType) || SPRING_JMS_RESPONSE.toString().equals(returnType)) {
+                    Type rt = listener.method().returnType();
+                    if (rt.kind() == Type.Kind.PARAMETERIZED_TYPE) {
+                        var args = rt.asParameterizedType().arguments();
+                        if (!args.isEmpty()) {
+                            addPayloadType(payloadTypes, args.get(0).name().toString());
+                        }
+                    }
+                } else {
+                    addPayloadType(payloadTypes, returnType);
+                }
+            }
+        }
+
+        for (var injectionPoint : combinedIndex.getIndex().getAnnotations(IDENTIFIER)) {
+            Type injectedType;
+            if (injectionPoint.target().kind() == AnnotationTarget.Kind.FIELD) {
+                injectedType = injectionPoint.target().asField().type();
+            } else if (injectionPoint.target().kind() == AnnotationTarget.Kind.METHOD_PARAMETER) {
+                var param = injectionPoint.target().asMethodParameter();
+                injectedType = param.method().parameterType(param.position());
+            } else {
+                continue;
+            }
+            DotName typeName = injectedType.name();
+            if (JMS_QUEUE.equals(typeName) || JMS_TOPIC.equals(typeName)) {
+                addPayloadType(payloadTypes, extractMessageType(injectedType).toString());
+            }
+        }
+
+        if (!payloadTypes.isEmpty()) {
+            reflective.produce(ReflectiveClassBuildItem.builder(payloadTypes.toArray(String[]::new))
+                    .methods(true).fields(true).build());
+        }
+    }
+
+    private static void addPayloadType(Set<String> types, String typeName) {
+        if (typeName != null
+                && !typeName.equals("java.lang.Object")
+                && !typeName.equals("java.lang.String")
+                && !typeName.startsWith("jakarta.jms.")) {
+            types.add(typeName);
+        }
     }
 
     private String generateInvoker(ClassOutput classOutput, JmsListenerBuildItem listener,
