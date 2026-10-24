@@ -125,3 +125,33 @@ public class OrderPipeline {
 
 If the first listener fails, the message stays on `incoming-orders` and nothing is sent to `validated-orders`.
 If the second listener fails, the message stays on `validated-orders` and the DB insert is rolled back.
+
+== Transaction Recovery
+
+After a crash, the transaction manager may have in-doubt (prepared but not committed) XA branches.
+Narayana's periodic recovery module resolves these by contacting each XA resource to find orphaned transactions.
+
+When `quarkus-narayana-jta` is on the classpath and recovery is enabled, Quarkus JMS automatically registers a JMS recovery helper with Narayana for each resolved `XAConnectionFactory`.
+The recovery module periodically connects to the broker and calls `XAResource.recover()` to find and resolve in-doubt branches.
+
+[source,properties]
+----
+quarkus.transaction-manager.enable-recovery=true
+----
+
+NOTE: Enable recovery in production when using XA transactions.
+Without it, a crash between `prepare` and `commit` leaves locks held on the broker and the database until manual intervention.
+
+== Using quarkus-pooled-jms with XA
+
+`quarkus-pooled-jms` uses a different XA model based on `SESSION_TRANSACTED` with auto-enlistment, which is incompatible with `@JmsListener(acknowledge = XA)` and `JmsClient` XA support.
+
+If you keep `quarkus-pooled-jms` for connection pooling alongside Quarkus JMS XA features, set:
+
+[source,properties]
+----
+quarkus.pooled-jms.transaction=disabled
+----
+
+If you prefer the `quarkus-pooled-jms` XA model, keep `quarkus.pooled-jms.transaction=xa` and use `@Transactional` methods with `connectionFactory.createContext(Session.SESSION_TRANSACTED)` directly.
+See the xref:migration.adoc#_transactions[migration guide] for details.

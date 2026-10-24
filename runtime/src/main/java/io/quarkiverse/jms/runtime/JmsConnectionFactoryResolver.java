@@ -10,6 +10,7 @@ import jakarta.inject.Singleton;
 import jakarta.jms.ConnectionFactory;
 import jakarta.jms.XAConnectionFactory;
 
+import io.quarkiverse.jms.spi.JmsXaRecovery;
 import io.quarkus.arc.ClientProxy;
 import io.smallrye.common.annotation.Identifier;
 
@@ -30,6 +31,9 @@ public class JmsConnectionFactoryResolver {
     @Inject
     @Any
     Instance<XAConnectionFactory> xaFactories;
+
+    @Inject
+    Instance<JmsXaRecovery> xaRecovery;
 
     private final ConcurrentHashMap<String, ConnectionFactory> cfCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, XAConnectionFactory> xaCache = new ConcurrentHashMap<>();
@@ -61,6 +65,9 @@ public class JmsConnectionFactoryResolver {
             ConnectionFactory cf = resolve(identifier);
             Object unwrapped = ClientProxy.unwrap(cf);
             if (unwrapped instanceof XAConnectionFactory xa) {
+                if (xaRecovery.isResolvable()) {
+                    xaRecovery.get().register(xa);
+                }
                 return xa;
             }
             return null;

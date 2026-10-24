@@ -61,6 +61,7 @@ import io.quarkus.arc.deployment.SyntheticBeansRuntimeInitBuildItem;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
 import io.quarkus.arc.processor.BeanInfo;
 import io.quarkus.arc.processor.InvokerInfo;
+import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.annotations.BuildProducer;
@@ -361,6 +362,19 @@ class JmsProcessor {
             Optional<io.quarkus.jms.spi.deployment.ConnectionFactoryWrapperBuildItem> wrapperLegacy) {
         if (wrapperNew.isPresent() || wrapperLegacy.isPresent()) {
             recorder.disableBuiltInPooling();
+        }
+    }
+
+    @BuildStep
+    void registerXaRecoveryBean(Capabilities capabilities,
+            BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
+        if (capabilities.isPresent(Capability.TRANSACTIONS)
+                && QuarkusClassLoader.isClassPresentAtRuntime("org.jboss.narayana.jta.jms.JmsXAResourceRecoveryHelper")
+                && QuarkusClassLoader.isClassPresentAtRuntime("org.jboss.tm.XAResourceRecoveryRegistry")) {
+            additionalBeans.produce(AdditionalBeanBuildItem.builder()
+                    .addBeanClass("io.quarkiverse.jms.runtime.NarayanaJmsXaRecovery")
+                    .setUnremovable()
+                    .build());
         }
     }
 

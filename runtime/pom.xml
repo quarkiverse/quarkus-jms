@@ -26,6 +26,11 @@
             <artifactId>jakarta.jms-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.quarkiverse.jms</groupId>
+            <artifactId>quarkus-jms-spi</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>io.smallrye.common</groupId>
             <artifactId>smallrye-common-annotation</artifactId>
         </dependency>
@@ -57,6 +62,16 @@
             <groupId>io.quarkiverse.jms</groupId>
             <artifactId>quarkus-jms-ironjacamar</artifactId>
             <version>${project.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.narayana.jta</groupId>
+            <artifactId>narayana-jta</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss</groupId>
+            <artifactId>jboss-transaction-spi</artifactId>
             <optional>true</optional>
         </dependency>
     </dependencies>
