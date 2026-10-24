@@ -49,8 +49,9 @@ public @interface JmsListener {
      * Number of concurrent consumers. Only applicable to queues.
      * When {@link #maxConcurrency()} is set to a higher value, this is the
      * minimum number of consumers that are always active.
+     * {@code 0} (default) means use {@code quarkus.jms.listener.concurrency}.
      */
-    int concurrency() default 1;
+    int concurrency() default 0;
 
     /**
      * Maximum number of concurrent consumers for dynamic scaling.
@@ -67,6 +68,7 @@ public @interface JmsListener {
 
     /**
      * Acknowledge mode for this listener.
+     * When not set, uses {@code quarkus.jms.listener.acknowledge-mode}.
      */
     AcknowledgeMode acknowledge() default AcknowledgeMode.AUTO;
 

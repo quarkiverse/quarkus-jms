@@ -119,15 +119,15 @@ class SpringJmsProcessor {
             String containerFactory = getStringValue(annotation, "containerFactory", "");
 
             boolean topic = springConfig.pubSubDomain();
-            String acknowledgeMode = "AUTO";
-            int concurrency = 1;
+            String acknowledgeMode = "";
+            int concurrency = 0;
             int maxConcurrency = -1;
 
             if (!containerFactory.isEmpty()) {
                 var factoryConfig = springConfig.containerFactories().get(containerFactory);
                 if (factoryConfig != null) {
                     topic = factoryConfig.pubSubDomain();
-                    acknowledgeMode = factoryConfig.acknowledgeMode().orElse("AUTO");
+                    acknowledgeMode = factoryConfig.acknowledgeMode().orElse("");
                     String factoryConcurrency = factoryConfig.concurrency().orElse("");
                     if (!factoryConcurrency.isEmpty() && concurrencyStr.isEmpty()) {
                         concurrencyStr = factoryConcurrency;

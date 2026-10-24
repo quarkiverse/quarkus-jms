@@ -153,7 +153,7 @@ public class JmsListenerRegistryImpl implements JmsListenerRegistry, ConsumerCon
     }
 
     private Closeable doRegister(ListenerConfig listenerConfig, JmsListenerInvoker invoker) {
-        String ackMode = listenerConfig.acknowledgeMode();
+        String ackMode = resolveAcknowledgeMode(listenerConfig.acknowledgeMode());
         boolean xa = "XA".equalsIgnoreCase(ackMode);
         ConnectionFactory cf = xa ? null : resolveConnectionFactory(listenerConfig.connectionFactory());
         int sessionMode = resolveSessionMode(ackMode);
@@ -204,8 +204,9 @@ public class JmsListenerRegistryImpl implements JmsListenerRegistry, ConsumerCon
     // --- Annotation-driven listeners ---
 
     private void startListener(JmsListenerMetadata metadata) {
-        boolean xa = "XA".equalsIgnoreCase(metadata.getAcknowledgeMode());
-        int sessionMode = resolveSessionMode(metadata.getAcknowledgeMode());
+        String effectiveAckMode = resolveAcknowledgeMode(metadata.getAcknowledgeMode());
+        boolean xa = "XA".equalsIgnoreCase(effectiveAckMode);
+        int sessionMode = resolveSessionMode(effectiveAckMode);
         int minConcurrency = metadata.getConcurrency() > 0 ? metadata.getConcurrency() : config.listener().concurrency();
         int maxConcurrency = Math.max(metadata.getMaxConcurrency() > 0 ? metadata.getMaxConcurrency()
                 : config.listener().maxConcurrency().orElse(minConcurrency), minConcurrency);
@@ -327,10 +328,14 @@ public class JmsListenerRegistryImpl implements JmsListenerRegistry, ConsumerCon
         }
     }
 
-    private int resolveSessionMode(String acknowledgeMode) {
-        if (acknowledgeMode == null || acknowledgeMode.isEmpty()) {
-            acknowledgeMode = config.listener().acknowledgeMode();
+    private String resolveAcknowledgeMode(String acknowledgeMode) {
+        if (acknowledgeMode == null || acknowledgeMode.isEmpty() || "DEFAULT".equalsIgnoreCase(acknowledgeMode)) {
+            return config.listener().acknowledgeMode();
         }
+        return acknowledgeMode;
+    }
+
+    private int resolveSessionMode(String acknowledgeMode) {
         return switch (acknowledgeMode.toUpperCase()) {
             case "AUTO" -> Session.AUTO_ACKNOWLEDGE;
             case "CLIENT" -> Session.CLIENT_ACKNOWLEDGE;

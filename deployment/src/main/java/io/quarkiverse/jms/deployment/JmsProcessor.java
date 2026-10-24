@@ -169,12 +169,12 @@ class JmsProcessor {
             boolean topic = getBooleanValue(annotation, "topic", false);
             String selector = getStringValue(annotation, "selector", "");
             String connectionFactory = getStringValue(annotation, "connectionFactory", "");
-            int concurrency = getIntValue(annotation, "concurrency", 1);
+            int concurrency = getIntValue(annotation, "concurrency", 0);
             int maxConcurrency = getIntValue(annotation, "maxConcurrency", -1);
             String subscription = getStringValue(annotation, "subscription", "");
 
             AnnotationValue ackValue = annotation.value("acknowledge");
-            String acknowledgeMode = ackValue != null ? ackValue.asEnum() : "AUTO";
+            String acknowledgeMode = ackValue != null ? ackValue.asEnum() : "DEFAULT";
 
             boolean runOnVirtualThread = method.hasAnnotation(DotNames.RUN_ON_VIRTUAL_THREAD)
                     || method.declaringClass().hasAnnotation(DotNames.RUN_ON_VIRTUAL_THREAD);
