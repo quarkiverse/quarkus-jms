@@ -1,0 +1,452 @@
+= JMS Providers
+
+Quarkus JMS works with any JMS provider that exposes a `ConnectionFactory` CDI bean.
+The extension is agnostic to the JMS providers: the application needs to include the JMS provider library of the broker,
+and either a Quarkus extension or the application produces the `ConnectionFactory` bean.
+
+The following providers are tested:
+
+[cols="2,3,2,1,1"]
+|===
+|Provider |Client |`ConnectionFactory` |JMS API |XA
+
+|Apache ActiveMQ Artemis
+|`io.quarkiverse.artemis:quarkus-artemis-jms`
+|Provided by the extension, with Dev Services
+|2.0
+|Yes
+
+|AMQP 1.0 brokers (Qpid JMS)
+|`org.amqphub.quarkus:quarkus-qpid-jms`
+|Provided by the extension
+|2.0
+|No
+
+|Apache ActiveMQ Classic
+|`org.apache.activemq:activemq-client-jakarta`
+|Produced by the application
+|2.0
+|Yes
+
+|IBM MQ
+|`com.ibm.mq:com.ibm.mq.jakarta.client`
+|Produced by the application
+|2.0
+|Yes
+
+|RabbitMQ
+|`com.rabbitmq.jms:rabbitmq-jms`
+|Produced by the application
+|2.0
+|No
+
+|Amazon SQS
+|`com.amazonaws:amazon-sqs-java-messaging-lib`
+|Produced by the application
+|1.1
+|No
+
+|Oracle AQ
+|`com.oracle.database.messaging:aqapi-jakarta`
+|Produced by the application
+|1.1
+|No
+|===
+
+== Dev Services
+
+Quarkus JMS does not start a broker itself.
+Dev Services come from the provider extension: currently, only `quarkus-artemis-jms` starts a broker in dev and test mode and configures its `ConnectionFactory`.
+For other providers, start the broker yourself, for example with Testcontainers in tests.
+
+== Native executables
+
+Quarkus JMS supports native executables.
+The JMS client library must also work in native mode: use a Quarkus extension that provides native support for it, such as `quarkus-artemis-jms` or `quarkus-qpid-jms`.
+When you produce the `ConnectionFactory` yourself with a plain JMS client library, native compilation depends on that library, and may require additional native-image configuration.
+
+// TODO: confirm whether payload classes used with typed destinations and @JmsListener need @RegisterForReflection for JSON conversion in native mode.
+
+== Producing a `ConnectionFactory`
+
+When no Quarkus extension provides the `ConnectionFactory`, produce it as a CDI bean.
+Quarkus JMS uses the `@Default` bean, or a bean qualified with `@Identifier` when a destination or listener sets `connection-factory` / `connectionFactory`.
+
+In the examples below, the configuration keys (`activemq.url`, `ibmmq.host`, ...) are defined by the application, not by Quarkus JMS.
+
+TLS and credentials are configured on the `ConnectionFactory`: through the provider extension's configuration, or in your producer method.
+A producer method can inject the Quarkus `TlsConfigurationRegistry` or a `CredentialsProvider` like any other CDI bean.
+
+=== XA connection factories
+
+Listeners with `acknowledge = XA`, the Reactive Messaging connector with `transaction-mode=xa`, and `receiveWith` in a `@Transactional` method need an `XAConnectionFactory`.
+Quarkus JMS looks for an `XAConnectionFactory` bean with the same qualifier as the `ConnectionFactory`.
+If there is none, it checks whether the `ConnectionFactory` bean itself implements `XAConnectionFactory`.
+For providers that use separate classes for XA, produce both beans, as shown for ActiveMQ Classic and IBM MQ.
+
+XA also requires the `quarkus-narayana-jta` extension.
+See xref:transactions.adoc[XA Distributed Transactions].
+
+== Apache ActiveMQ Artemis
+
+Add the Artemis JMS extension:
+
+[source,xml]
+----
+<dependency>
+    <groupId>io.quarkiverse.artemis</groupId>
+    <artifactId>quarkus-artemis-jms</artifactId>
+</dependency>
+----
+
+The extension provides the `ConnectionFactory` from configuration, and starts a broker with Dev Services in dev and test mode:
+
+[source,properties]
+----
+quarkus.artemis.url=tcp://localhost:61616
+quarkus.artemis.username=quarkus
+quarkus.artemis.password=quarkus
+----
+
+To use XA transactions, enable XA-capable connection factories:
+
+[source,properties]
+----
+quarkus.artemis.xa-enabled=true
+----
+
+See the https://docs.quarkiverse.io/quarkus-artemis/dev/index.html[Quarkus Artemis documentation] for named connection factories and other options.
+
+== AMQP 1.0 brokers with Qpid JMS
+
+Add the Qpid JMS extension:
+
+[source,xml]
+----
+<dependency>
+    <groupId>org.amqphub.quarkus</groupId>
+    <artifactId>quarkus-qpid-jms</artifactId>
+</dependency>
+----
+
+The extension provides the `ConnectionFactory` from configuration:
+
+[source,properties]
+----
+quarkus.qpid-jms.url=amqp://localhost:5672
+quarkus.qpid-jms.username=quarkus
+quarkus.qpid-jms.password=quarkus
+----
+
+Qpid JMS connects to AMQP 1.0 brokers such as ActiveMQ Artemis, ActiveMQ Classic, Qpid Broker-J and Azure Service Bus.
+See the https://github.com/amqphub/quarkus-qpid-jms[Quarkus Qpid JMS documentation] for the other options.
+
+== Apache ActiveMQ Classic
+
+Add the ActiveMQ Classic client:
+
+[source,xml]
+----
+<dependency>
+    <groupId>org.apache.activemq</groupId>
+    <artifactId>activemq-client-jakarta</artifactId>
+    <version>${activemq.version}</version>
+</dependency>
+----
+
+Produce the connection factories:
+
+[source,java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Singleton;
+import jakarta.jms.ConnectionFactory;
+import jakarta.jms.XAConnectionFactory;
+
+import org.apache.activemq.ActiveMQConnectionFactory;
+import org.apache.activemq.ActiveMQXAConnectionFactory;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@ApplicationScoped
+public class ActiveMqConnectionFactoryProducer {
+
+    @Produces
+    @Singleton
+    ConnectionFactory connectionFactory(@ConfigProperty(name = "activemq.url") String brokerUrl) {
+        return new ActiveMQConnectionFactory(brokerUrl);
+    }
+
+    // Only needed for XA transactions
+    @Produces
+    @Singleton
+    XAConnectionFactory xaConnectionFactory(@ConfigProperty(name = "activemq.url") String brokerUrl) {
+        return new ActiveMQXAConnectionFactory(brokerUrl);
+    }
+}
+----
+
+[source,properties]
+----
+activemq.url=tcp://localhost:61616
+----
+
+== IBM MQ
+
+Add the IBM MQ Jakarta client:
+
+[source,xml]
+----
+<dependency>
+    <groupId>com.ibm.mq</groupId>
+    <artifactId>com.ibm.mq.jakarta.client</artifactId>
+    <version>${ibmmq.version}</version>
+</dependency>
+----
+
+Produce the connection factories with `JmsFactoryFactory`:
+
+[source,java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Singleton;
+import jakarta.jms.ConnectionFactory;
+import jakarta.jms.JMSException;
+import jakarta.jms.XAConnectionFactory;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import com.ibm.msg.client.jakarta.jms.JmsConnectionFactory;
+import com.ibm.msg.client.jakarta.jms.JmsFactoryFactory;
+import com.ibm.msg.client.jakarta.wmq.WMQConstants;
+
+@ApplicationScoped
+public class IbmMqConnectionFactoryProducer {
+
+    @ConfigProperty(name = "ibmmq.host")
+    String host;
+
+    @ConfigProperty(name = "ibmmq.port")
+    int port;
+
+    @ConfigProperty(name = "ibmmq.queue-manager")
+    String queueManager;
+
+    @ConfigProperty(name = "ibmmq.channel")
+    String channel;
+
+    @ConfigProperty(name = "ibmmq.user")
+    String user;
+
+    @ConfigProperty(name = "ibmmq.password")
+    String password;
+
+    @Produces
+    @Singleton
+    ConnectionFactory connectionFactory() throws JMSException {
+        JmsConnectionFactory cf = JmsFactoryFactory.getInstance(WMQConstants.JAKARTA_WMQ_PROVIDER)
+                .createConnectionFactory();
+        configure(cf);
+        return cf;
+    }
+
+    // Only needed for XA transactions
+    @Produces
+    @Singleton
+    XAConnectionFactory xaConnectionFactory() throws JMSException {
+        var cf = JmsFactoryFactory.getInstance(WMQConstants.JAKARTA_WMQ_PROVIDER)
+                .createXAConnectionFactory();
+        configure(cf);
+        return cf;
+    }
+
+    private void configure(JmsConnectionFactory cf) throws JMSException {
+        cf.setStringProperty(WMQConstants.WMQ_HOST_NAME, host);
+        cf.setIntProperty(WMQConstants.WMQ_PORT, port);
+        cf.setStringProperty(WMQConstants.WMQ_QUEUE_MANAGER, queueManager);
+        cf.setStringProperty(WMQConstants.WMQ_CHANNEL, channel);
+        cf.setIntProperty(WMQConstants.WMQ_CONNECTION_MODE, WMQConstants.WMQ_CM_CLIENT);
+        cf.setStringProperty(WMQConstants.USERID, user);
+        cf.setStringProperty(WMQConstants.PASSWORD, password);
+    }
+}
+----
+
+[source,properties]
+----
+ibmmq.host=localhost
+ibmmq.port=1414
+ibmmq.queue-manager=QM1
+ibmmq.channel=DEV.APP.SVRCONN
+ibmmq.user=app
+ibmmq.password=passw0rd
+----
+
+IBM MQ queue names often differ from the names used in the application.
+Use the `destination` property to map them:
+
+[source,properties]
+----
+quarkus.jms.destinations.orders.destination=DEV.QUEUE.1
+----
+
+== RabbitMQ
+
+Add the RabbitMQ JMS client:
+
+[source,xml]
+----
+<dependency>
+    <groupId>com.rabbitmq.jms</groupId>
+    <artifactId>rabbitmq-jms</artifactId>
+    <version>${rabbitmq-jms.version}</version>
+</dependency>
+----
+
+Produce the connection factory:
+
+[source,java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Singleton;
+import jakarta.jms.ConnectionFactory;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import com.rabbitmq.jms.admin.RMQConnectionFactory;
+
+@ApplicationScoped
+public class RabbitMqConnectionFactoryProducer {
+
+    @Produces
+    @Singleton
+    ConnectionFactory connectionFactory(
+            @ConfigProperty(name = "rabbitmq.host") String host,
+            @ConfigProperty(name = "rabbitmq.port") int port,
+            @ConfigProperty(name = "rabbitmq.username") String username,
+            @ConfigProperty(name = "rabbitmq.password") String password) {
+        RMQConnectionFactory cf = new RMQConnectionFactory();
+        cf.setHost(host);
+        cf.setPort(port);
+        cf.setUsername(username);
+        cf.setPassword(password);
+        return cf;
+    }
+}
+----
+
+RabbitMQ does not prefetch messages for JMS consumers by default, so consumer caching (`quarkus.jms.pool.cache-consumers=true`) can be enabled safely.
+
+== Amazon SQS
+
+The SQS JMS client only implements JMS 1.1.
+Enable the JMS 1.1 compatibility mode:
+
+[source,properties]
+----
+quarkus.jms.jms11=true
+----
+
+Add the SQS JMS client:
+
+[source,xml]
+----
+<dependency>
+    <groupId>com.amazonaws</groupId>
+    <artifactId>amazon-sqs-java-messaging-lib</artifactId>
+    <version>${amazon-sqs-java-messaging-lib.version}</version>
+</dependency>
+----
+
+Produce the connection factory from an `SqsClient`:
+
+[source,java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Singleton;
+import jakarta.jms.ConnectionFactory;
+
+import com.amazon.sqs.javamessaging.ProviderConfiguration;
+import com.amazon.sqs.javamessaging.SQSConnectionFactory;
+
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sqs.SqsClient;
+
+@ApplicationScoped
+public class SqsConnectionFactoryProducer {
+
+    @Produces
+    @Singleton
+    ConnectionFactory connectionFactory() {
+        SqsClient sqsClient = SqsClient.builder()
+                .region(Region.EU_WEST_1)
+                .build();
+        return new SQSConnectionFactory(new ProviderConfiguration(), sqsClient);
+    }
+}
+----
+
+XA transactions are not available in JMS 1.1 compatibility mode.
+
+== Oracle AQ
+
+The Oracle AQ JMS client only implements JMS 1.1.
+Enable the JMS 1.1 compatibility mode:
+
+[source,properties]
+----
+quarkus.jms.jms11=true
+----
+
+Add the AQ JMS client and the Oracle JDBC driver:
+
+[source,xml]
+----
+<dependency>
+    <groupId>com.oracle.database.messaging</groupId>
+    <artifactId>aqapi-jakarta</artifactId>
+    <version>${oracle.aqapi.version}</version>
+</dependency>
+<dependency>
+    <groupId>com.oracle.database.jdbc</groupId>
+    <artifactId>ojdbc11</artifactId>
+    <version>${oracle.jdbc.version}</version>
+</dependency>
+----
+
+Produce the connection factory from an Oracle data source:
+
+[source,java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Singleton;
+import jakarta.jms.ConnectionFactory;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import oracle.jakarta.jms.AQjmsFactory;
+import oracle.jdbc.pool.OracleDataSource;
+
+@ApplicationScoped
+public class OracleAqConnectionFactoryProducer {
+
+    @Produces
+    @Singleton
+    ConnectionFactory connectionFactory(
+            @ConfigProperty(name = "oracle.jdbc.url") String jdbcUrl,
+            @ConfigProperty(name = "oracle.jdbc.user") String user,
+            @ConfigProperty(name = "oracle.jdbc.password") String password) throws Exception {
+        OracleDataSource dataSource = new OracleDataSource();
+        dataSource.setURL(jdbcUrl);
+        dataSource.setUser(user);
+        dataSource.setPassword(password);
+        return AQjmsFactory.getConnectionFactory(dataSource);
+    }
+}
+----
+
+XA transactions are not available in JMS 1.1 compatibility mode.

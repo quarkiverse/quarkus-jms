@@ -1,0 +1,350 @@
+= Migrating to Quarkus JMS
+
+This guide shows how to move existing JMS code to the Quarkus JMS extension.
+It covers two cases:
+
+* applications that use a `ConnectionFactory` directly, with hand-written producers and consumer threads
+* applications that receive messages through a JCA resource adapter with IronJacamar
+
+In both cases you keep your JMS provider extension (for example `quarkus-artemis-jms`) and its configuration.
+Quarkus JMS works on top of the `ConnectionFactory` bean it provides.
+
+== Adding the extension
+
+Add `quarkus-jms` next to your JMS provider:
+
+[source,xml]
+----
+<dependency>
+    <groupId>io.quarkiverse.jms</groupId>
+    <artifactId>quarkus-jms</artifactId>
+</dependency>
+----
+
+By default, the extension uses the `@Default` CDI `ConnectionFactory` bean.
+If your application produces its own `ConnectionFactory` (for example for IBM MQ), keep the producer method as it is.
+If it produces several factories qualified with `@Identifier`, see <<named-factories>>.
+
+== From hand-written `ConnectionFactory` code
+
+=== Sending messages
+
+A typical producer creates a `JMSContext` for each send, creates a destination, and sends a message:
+
+[source,java]
+----
+@ApplicationScoped
+public class OrderSender {
+
+    @Inject
+    ConnectionFactory connectionFactory;
+
+    @Inject
+    ObjectMapper mapper;
+
+    public void send(Order order) throws JsonProcessingException {
+        try (JMSContext context = connectionFactory.createContext(JMSContext.AUTO_ACKNOWLEDGE)) {
+            TextMessage message = context.createTextMessage(mapper.writeValueAsString(order));
+            message.setStringProperty("category", order.category());
+            context.createProducer()
+                    .setPriority(5)
+                    .send(context.createQueue("orders"), message);
+        }
+    }
+}
+----
+
+With Quarkus JMS, inject a typed destination instead.
+The extension borrows a pooled session for each operation and converts the payload to JSON:
+
+[source,java]
+----
+@ApplicationScoped
+public class OrderSender {
+
+    @Inject
+    @Identifier("orders")
+    JmsQueue<Order> orders;
+
+    public void send(Order order) {
+        orders.message(order)
+                .property("category", order.category())
+                .priority(5)
+                .send();
+    }
+}
+----
+
+The following table maps the JMS producer API to the `JmsQueue` / `JmsTopic` builder:
+
+[cols="1,1"]
+|===
+|JMS API |Quarkus JMS
+
+|`connectionFactory.createContext(...)` and `context.createQueue(name)`
+|`@Inject @Identifier("name") JmsQueue<T>`, or `jmsClient.queue(name)` for names known only at runtime
+
+|`context.createTopic(name)`
+|`@Inject @Identifier("name") JmsTopic<T>`, or `jmsClient.topic(name)`
+
+|`producer.setPriority()`, `setTimeToLive()`, `setDeliveryMode()`, `setDeliveryDelay()`
+|`message(payload).priority()`, `timeToLive()`, `deliveryMode()`, `deliveryDelay()`, or per-destination defaults in `quarkus.jms.destinations.<name>.*`
+
+|`message.setStringProperty()`, `setJMSCorrelationID()`, `setJMSReplyTo()`
+|`message(payload).property()`, `correlationId()`, `replyTo()`
+
+|Manual JSON serialization with `createTextMessage()`
+|Typed destination; POJOs are serialized to JSON by `JmsMessageConverter`
+|===
+
+When another application expects a specific message format, you can still build the JMS message yourself:
+
+[source,java]
+----
+orders.send(ctx -> {
+    TextMessage msg = ctx.createTextMessage(legacyFormat(order));
+    msg.setStringProperty("format", "legacy");
+    return msg;
+});
+----
+
+NOTE: Messages sent with a typed destination carry the payload type in the `_type` message property (configurable with `quarkus.jms.converter.type-id-property`).
+Consumers that are not built with Quarkus JMS can ignore this property.
+
+=== Receiving messages synchronously
+
+Code that receives a single message with a `JMSConsumer`:
+
+[source,java]
+----
+try (JMSContext context = connectionFactory.createContext(JMSContext.AUTO_ACKNOWLEDGE);
+        JMSConsumer consumer = context.createConsumer(context.createQueue("orders"), "priority > 3")) {
+    Message message = consumer.receive(5000);
+    Order order = message == null ? null : mapper.readValue(message.getBody(String.class), Order.class);
+}
+----
+
+becomes:
+
+[source,java]
+----
+Optional<Order> order = orders
+        .select("priority > 3")
+        .receiveTimeout(Duration.ofSeconds(5))
+        .receive();
+----
+
+To receive several messages with the same consumer, use `receiveWith`.
+For request-reply code that creates a temporary queue and waits for the reply, use `sendAndReceive()`.
+
+=== Replacing consumer threads with `@JmsListener`
+
+Continuous consumption is usually implemented with a thread started at application startup, running a `receive()` loop:
+
+[source,java]
+----
+@ApplicationScoped
+public class OrderConsumer implements Runnable {
+
+    @Inject
+    ConnectionFactory connectionFactory;
+
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    void onStart(@Observes StartupEvent ev) {
+        executor.submit(this);
+    }
+
+    void onStop(@Observes ShutdownEvent ev) {
+        executor.shutdown();
+    }
+
+    @Override
+    public void run() {
+        try (JMSContext context = connectionFactory.createContext(JMSContext.AUTO_ACKNOWLEDGE)) {
+            JMSConsumer consumer = context.createConsumer(context.createQueue("orders"));
+            while (true) {
+                Message message = consumer.receive();
+                if (message == null) {
+                    return;
+                }
+                process(mapper.readValue(message.getBody(String.class), Order.class));
+            }
+        } catch (JMSException | JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+----
+
+With Quarkus JMS, the startup and shutdown observers, the executor and the loop are replaced by an annotated method:
+
+[source,java]
+----
+@ApplicationScoped
+public class OrderConsumer {
+
+    @JmsListener("orders")
+    void process(Order order) {
+        // ...
+    }
+}
+----
+
+The extension starts the consumer workers, reconnects after a connection failure, and waits for in-flight messages on shutdown.
+The following table maps the usual hand-written patterns to `@JmsListener`:
+
+[cols="1,1"]
+|===
+|Hand-written code |Quarkus JMS
+
+|`context.setMessageListener()` or a `receive()` loop on a dedicated thread
+|`@JmsListener("destination")`
+
+|Several consumer threads
+|`concurrency`, and `maxConcurrency` for elastic scaling
+
+|`ExceptionListener` and custom reconnection logic
+|Automatic reconnection, configured with `quarkus.jms.listener.reconnect-*`
+
+|Stopping the executor on `ShutdownEvent`
+|Graceful shutdown, configured with `quarkus.jms.listener.shutdown-timeout`
+
+|`message.getStringProperty("name")`
+|A method parameter annotated with `@JmsHeader("name")`
+
+|`CLIENT_ACKNOWLEDGE` and `message.acknowledge()`
+|`acknowledge = AcknowledgeMode.CLIENT`
+
+|`SESSION_TRANSACTED` with `commit()` / `rollback()`
+|`acknowledge = AcknowledgeMode.TRANSACTED`
+
+|`context.createDurableConsumer(topic, name)`
+|`topic = true, subscription = "name"`
+
+|Consumer created with a message selector
+|`selector = "..."`
+
+|Sending a reply to `message.getJMSReplyTo()`
+|Returning a value from the listener; it is sent to `@SendTo` or, if absent, to `JMSReplyTo`
+
+|`catch` block forwarding the message to a dead letter queue
+|A `JmsListenerErrorHandler` bean
+|===
+
+If your JMS client already handles reconnection (for example with the Artemis `reconnectAttempts` URL parameter), set `quarkus.jms.listener.reconnect-attempts=0`.
+
+When destinations are only known at runtime, register listeners programmatically with `JmsListenerRegistry`.
+
+=== Transactions
+
+Local transactions written with `SESSION_TRANSACTED` map to the `TRANSACTED` acknowledge mode, as shown above.
+
+For XA transactions, applications typically combined `quarkus-pooled-jms` (with `quarkus.pooled-jms.transaction=xa`), `quarkus-narayana-jta` and, for consumers, a JCA resource adapter.
+With Quarkus JMS, keep `quarkus-narayana-jta` and set the acknowledge mode of the listener to `XA`:
+
+[source,java]
+----
+@JmsListener(value = "orders", acknowledge = JmsListener.AcknowledgeMode.XA)
+void process(Order order) {
+    entityManager.persist(order);
+}
+----
+
+See xref:transactions.adoc[XA Distributed Transactions] for the Reactive Messaging connector and for `receiveWith` inside `@Transactional` methods.
+
+If you keep `quarkus-pooled-jms`, you have two options for XA:
+
+* **Keep `quarkus.pooled-jms.transaction=xa`** — the pool manages XA enlistment automatically.
+  Use `@Transactional` methods with `connectionFactory.createContext(Session.SESSION_TRANSACTED)` as before.
+  This approach works but does not integrate with `@JmsListener(acknowledge = XA)` or `JmsClient` XA support.
+* **Use Quarkus JMS XA** — set `quarkus.pooled-jms.transaction=disabled` so the pool handles connection/session pooling only.
+  Quarkus JMS manages XA enlistment directly through the `XAConnectionFactory`, which is incompatible with the `quarkus-pooled-jms` XA model.
+  This lets you use `@JmsListener(acknowledge = XA)` and `JmsClient` inside `@Transactional` methods.
+
+=== Connection pooling
+
+The built-in session pool shares a single connection and pools sessions per acknowledge mode.
+If you added `quarkus-pooled-jms` only to pool sessions, you can remove it.
+Keep it if you need multiple connections to the broker, per-connection session limits, or JMX monitoring: when `quarkus-pooled-jms` is present, the built-in pool is disabled.
+
+[[named-factories]]
+=== Named connection factories
+
+Code that injects a named factory:
+
+[source,java]
+----
+@Inject
+@Identifier("broker-b")
+ConnectionFactory brokerB;
+----
+
+maps to the `connection-factory` destination property for `JmsQueue` and `JmsTopic`:
+
+[source,properties]
+----
+quarkus.jms.destinations.orders.connection-factory=broker-b
+----
+
+and to the `connectionFactory` attribute for listeners:
+
+[source,java]
+----
+@JmsListener(value = "orders", connectionFactory = "broker-b")
+void process(Order order) { }
+----
+
+== From JCA message endpoints (IronJacamar)
+
+With `quarkus-ironjacamar` and a resource adapter such as `quarkus-artemis-jms-ra`, message endpoints implement `MessageListener` and are annotated with `@ResourceEndpoint`:
+
+[source,java]
+----
+@ResourceEndpoint(activationSpecConfigKey = "orders")
+public class OrderEndpoint implements MessageListener {
+
+    @Inject
+    ObjectMapper mapper;
+
+    @Override
+    public void onMessage(Message message) {
+        try {
+            Order order = mapper.readValue(message.getBody(String.class), Order.class);
+            String category = message.getStringProperty("category");
+            // ...
+        } catch (JMSException | JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+----
+
+[source,properties]
+----
+quarkus.ironjacamar.activation-spec.orders.config.destination-type=jakarta.jms.Queue
+quarkus.ironjacamar.activation-spec.orders.config.destination=orders
+----
+
+With Quarkus JMS, keep the `@ResourceEndpoint` annotation on the class and replace `onMessage` with a `@JmsListener` method:
+
+[source,java]
+----
+@ResourceEndpoint
+public class OrderEndpoint {
+
+    @JmsListener("orders")
+    void process(Order order, @JmsHeader("category") String category) {
+        // ...
+    }
+}
+----
+
+Messages are still delivered through the JCA resource adapter, with its XA transaction support.
+Quarkus JMS generates the `MessageListener` adapter and invokes the method with the converted payload and headers.
+
+The listener is declared and configured the same way as with the default polling consumer; nothing is specific to JCA activation.
+The only difference is that the built-in session pool is disabled, since the resource adapter manages the connections.
+The resource adapter configuration (`quarkus.ironjacamar.ra.*`) does not change.
+
+Without `@ResourceEndpoint`, the same listener uses the default polling consumer, even if IronJacamar is on the classpath.

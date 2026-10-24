@@ -1,5 +1,7 @@
 * xref:index.adoc[Getting Started]
 * xref:quarkus-jms.adoc[Quarkus JMS]
+* xref:providers.adoc[JMS Providers]
 * xref:reactive-messaging.adoc[Reactive Messaging JMS Connector]
 * xref:transactions.adoc[XA Transactions]
 * xref:spring-jms.adoc[Spring JMS Compatibility]
+* xref:migration.adoc[Migrating to Quarkus JMS]

@@ -12,7 +12,9 @@ The Quarkus JMS extension provides three complementary APIs for working with JMS
 * **`@JmsListener`** — annotation-driven message consumption
 * **Reactive Messaging connector** (`smallrye-jms`) — `@Incoming` / `@Outgoing` channel-based messaging
 
-All three support local and XA distributed transactions, connection pooling, and DevServices.
+All three support local and XA distributed transactions and connection pooling.
+
+NOTE: This extension is in preview. Its API and configuration may still change based on feedback.
 
 [cols="20,40,40"]
 |===
@@ -36,7 +38,7 @@ Add the extension to your project:
 ----
 
 You also need a JMS provider.
-For example, the https://quarkiverse.github.io/quarkiverse-docs/quarkus-artemis-jms/dev/index.html[Quarkus Artemis JMS extension] provides support for Apache Artemis:
+For example, the https://docs.quarkiverse.io/quarkus-artemis/dev/index.html[Quarkus Artemis JMS extension] provides support for Apache Artemis:
 
 [source,xml]
 ----
@@ -107,7 +109,9 @@ With `quarkus-artemis-jms` on the classpath, a broker is started via Dev Service
 
 == What's Next
 
-* xref:quarkus-jms.adoc[Quarkus JMS] — fluent API, listeners, configuration, observability, migration
+* xref:quarkus-jms.adoc[Quarkus JMS] — fluent API, listeners, configuration, observability
+* xref:providers.adoc[JMS Providers] — tested providers and how to configure them
 * xref:reactive-messaging.adoc[Reactive Messaging JMS Connector] — `@Incoming` / `@Outgoing` channel-based messaging
 * xref:transactions.adoc[XA Distributed Transactions] — atomic JMS + database operations
 * xref:spring-jms.adoc[Spring JMS Compatibility] — use Spring JMS annotations and types in Quarkus
+* xref:migration.adoc[Migrating to Quarkus JMS] — move hand-written JMS code and JCA endpoints to Quarkus JMS

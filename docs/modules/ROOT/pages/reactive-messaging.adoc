@@ -11,6 +11,9 @@ For channel-based messaging with `@Incoming` / `@Outgoing`, add the Reactive Mes
 </dependency>
 ----
 
+This page covers the main options.
+See the https://smallrye.io/smallrye-reactive-messaging/latest/jms/jms/[SmallRye Reactive Messaging JMS connector documentation] for the full reference.
+
 == Incoming Channels
 
 Configure a channel to consume messages from a JMS destination:

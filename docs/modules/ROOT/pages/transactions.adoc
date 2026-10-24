@@ -14,7 +14,17 @@ The `@JmsListener`, Reactive Messaging connector, and `JmsClient` all support XA
 </dependency>
 ----
 
-The `ConnectionFactory` must implement `XAConnectionFactory` (Artemis does).
+You also need an XA-capable connection factory.
+For each connection factory identifier, Quarkus JMS first looks for an `XAConnectionFactory` bean with the same qualifier.
+If there is none, it checks whether the `ConnectionFactory` bean itself implements `XAConnectionFactory`.
+
+Among the tested providers, Apache ActiveMQ Artemis (with `quarkus.artemis.xa-enabled=true`), Apache ActiveMQ Classic and IBM MQ support XA.
+For ActiveMQ Classic and IBM MQ, produce an `XAConnectionFactory` bean next to the `ConnectionFactory` bean.
+See xref:providers.adoc[JMS Providers] for examples.
+
+XA is not available in JMS 1.1 compatibility mode (`quarkus.jms.jms11=true`).
+
+Database resources must also be XA-capable, for example with `quarkus.datasource.jdbc.transactions=xa`.
 
 == @JmsListener with XA
 
@@ -56,7 +66,22 @@ This works with `@Blocking`, `@NonBlocking`, and `@RunOnVirtualThread` — the t
 
 == JmsClient with XA
 
-`receiveWith` participates in the caller's transaction.
+Operations on `JmsQueue`, `JmsTopic` and `JmsClient` participate in the caller's transaction.
+When one of them is called inside an active transaction, for example in a `@Transactional` method, the extension creates an XA context, enlists it in the transaction, and closes it when the transaction completes.
+This applies to sends, receives, `receiveWith` and `execute`.
+
+A message sent inside a transaction is only delivered when the transaction commits:
+
+[source,java]
+----
+@Transactional
+void placeOrder(Order order) {
+    entityManager.persist(order);
+    orders.send(order);
+    // the insert and the send commit together, or are both rolled back
+}
+----
+
 When called inside a `@Transactional` method, all receives and database operations commit or roll back atomically:
 
 [source,java]
@@ -69,6 +94,14 @@ void processBatch() {
     });
 }
 ----
+
+=== Without an XA connection factory
+
+If a transaction is active but no XA-capable connection factory is available, the operation uses a local transacted JMS session instead.
+The session is committed after the transaction commits, and rolled back if the transaction rolls back.
+
+This is not atomic: if the JMS commit fails after the database commit, the database changes are kept but the JMS operation is lost.
+Use an XA connection factory when both must succeed or fail together.
 
 == XA with Virtual Threads
 

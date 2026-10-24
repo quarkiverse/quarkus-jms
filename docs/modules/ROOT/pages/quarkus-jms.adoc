@@ -44,10 +44,10 @@ public class OrderResource {
 }
 ----
 
-Injected endpoints are type-safe: the generic parameter (`Order` above) determines the payload type for both sending and receiving, and <<Message Conversion,message conversion>> is handled transparently.
+Injected endpoints are type-safe: the generic parameter (`Order` above) determines the payload type for both sending and receiving, and <<jms_message_converters,message conversion>> is handled transparently.
 
 All operations on `JmsQueue` and `JmsTopic` are **blocking**.
-Under the hood, each call acquires a <<Session Pooling,pooled session>>, performs the JMS operation, and releases the session back to the pool.
+Under the hood, each call acquires a <<session_pooling,pooled session>>, performs the JMS operation, and releases the session back to the pool.
 This makes them safe to use from REST endpoints, `@Scheduled` methods, and `@Transactional` services, but they should not be called from a Vert.x event-loop thread.
 
 === Configuring Destinations
@@ -197,7 +197,7 @@ Both `receive()` and `receiveMessage()` also accept a `Class<U>` parameter to de
 
 ==== Receiving Multiple Messages
 
-By default, <<Consumer Caching, JMS consumers are not cached>> and each `receive()` operation creates a consumer, receives one message, and closes the consumer.
+By default, <<consumer_caching, JMS consumers are not cached>> and each `receive()` operation creates a consumer, receives one message, and closes the consumer.
 To keep a single consumer open for multiple receives, use `receiveWith`:
 
 [source,java]
@@ -402,6 +402,47 @@ public void process(Order order,
 }
 ----
 
+=== `@JmsListener` attributes
+
+[cols="2,1,4"]
+|===
+|Attribute |Default |Description
+
+|`value`
+|_required_
+|The destination name (queue or topic).
+
+|`topic`
+|`false`
+|Whether the destination is a topic.
+
+|`selector`
+|
+|JMS message selector. Only matching messages are delivered to the listener.
+
+|`connectionFactory`
+|
+|Identifier of a `ConnectionFactory` bean qualified with `@Identifier`. When empty, the `@Default` bean is used.
+
+|`concurrency`
+|`1`
+|Number of concurrent consumers. When `maxConcurrency` is set, the minimum number of consumers. Only applies to queues.
+
+|`maxConcurrency`
+|`quarkus.jms.listener.max-concurrency`
+|Maximum number of consumers. When greater than `concurrency`, consumers are added under load and removed when idle. Must be greater than or equal to `concurrency`.
+
+|`subscription`
+|
+|Durable subscription name. Only applies to topics.
+
+|`acknowledge`
+|`AUTO`
+|Acknowledge mode: `AUTO`, `CLIENT`, `DUPS_OK`, `TRANSACTED` or `XA`. See <<acknowledge_modes>>.
+|===
+
+The annotation is repeatable: a method can listen on several destinations, see <<repeatable_listeners>>.
+
 === Reply Routing with @SendTo
 
 If the listener method returns a value, the extension sends it to the destination specified by `@SendTo`.
@@ -489,7 +530,7 @@ Each `@JmsListener` method is backed by one or more `ConsumerWorker` threads tha
 For XA mode, each poll cycle creates a fresh `XAJMSContext`, begins a transaction, receives a message, invokes the listener, and commits — or rolls back on failure. The XA context is closed after each cycle.
 
 Workers run on Vert.x blocking thread pool by default, or on virtual threads when `@RunOnVirtualThread` is present.
-Connection failures trigger automatic reconnection with exponential backoff (see <<Reconnection>>).
+Connection failures trigger automatic reconnection with exponential backoff (see <<reconnection>>).
 
 === Concurrency
 
@@ -562,6 +603,7 @@ public class OrderProcessor {
 }
 ----
 
+[[acknowledge_modes]]
 === Acknowledge Modes
 
 The acknowledge mode controls when and how the broker considers a message successfully delivered:
@@ -593,6 +635,7 @@ The acknowledge mode controls when and how the broker considers a message succes
 
 See xref:transactions.adoc[XA Distributed Transactions] for XA details.
 
+[[reconnection]]
 === Reconnection
 
 When a JMS connection is lost, listeners automatically reconnect with exponential backoff:
@@ -607,6 +650,7 @@ quarkus.jms.listener.reconnect-max-interval=PT30S  # max delay (default)
 Set `reconnect-attempts=0` to disable Quarkus reconnection when the JMS client handles
 it internally (e.g., Artemis `reconnectAttempts` URL parameter).
 
+[[repeatable_listeners]]
 === Repeatable Listeners
 
 A single method can listen on multiple destinations using repeated annotations:
@@ -678,6 +722,7 @@ var config = ListenerConfig.topic("events")
 registry.register(config, Event.class, this::handleEvent);
 ----
 
+[[session_pooling]]
 == Session Pooling
 
 By default, the extension shares a single JMS connection and maintains a bounded session pool per acknowledge mode.
@@ -702,6 +747,7 @@ Set `borrow-timeout` to control this:
 - **`PT30S`** — block up to 30 seconds, then throw `JMSRuntimeException`.
 - **`PT0S`** — fail immediately if no session is available (no blocking).
 
+[[consumer_caching]]
 === Consumer Caching
 
 By default, consumer caching is disabled (`quarkus.jms.pool.cache-consumers=false`) because most brokers prefetch messages into consumer buffers.
@@ -719,7 +765,11 @@ This is sufficient for most applications. Use `quarkus-pooled-jms` (Quarkiverse)
 
 When `quarkus-pooled-jms` is on the classpath, the built-in session pool is automatically disabled.
 
-[[pool-metrics]]
+NOTE: If you use `@JmsListener(acknowledge = XA)` or `JmsClient` XA support, set `quarkus.pooled-jms.transaction=disabled`.
+Quarkus JMS manages XA enlistment directly through the `XAConnectionFactory`, which is incompatible with the `quarkus-pooled-jms` XA model (`SESSION_TRANSACTED` with auto-enlistment).
+If you prefer the `quarkus-pooled-jms` XA model, keep `quarkus.pooled-jms.transaction=xa` and use `@Transactional` methods with `createContext(Session.SESSION_TRANSACTED)` directly.
+
+[[pool_metrics]]
 === Pool Metrics
 
 When `quarkus-micrometer` is on the classpath, the session pool exposes the following gauges:
@@ -750,6 +800,7 @@ If messages are still being processed after the timeout, a warning is logged and
 connections are closed. Listeners that use `receiveNoWait()` batching will finish
 their current batch before stopping.
 
+[[jms_message_converters]]
 == JMS Message Converters
 
 Messages are automatically converted using `JmsMessageConverter`:
@@ -857,7 +908,7 @@ When `quarkus-micrometer` is on the classpath, JMS operations are automatically 
 | `jms.listener` | `destination`, `outcome` (success/error) | Duration of `@JmsListener` message processing
 |===
 
-Session pool metrics are also exposed — see <<pool-metrics>>.
+Session pool metrics are also exposed — see <<pool_metrics>>.
 
 == Spring JMS Compatibility
 
