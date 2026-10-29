@@ -12,7 +12,7 @@
     <name>Quarkus JMS - Integration Tests - Amazon SQS</name>
 
     <properties>
-        <amazon-sqs-java-messaging-lib.version>2.1.4</amazon-sqs-java-messaging-lib.version>
+        <amazon-sqs-java-messaging-lib.version>2.1.5</amazon-sqs-java-messaging-lib.version>
     </properties>
 
     <dependencies>
